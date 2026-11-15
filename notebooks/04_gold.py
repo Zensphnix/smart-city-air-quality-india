@@ -7,6 +7,8 @@
 
 # COMMAND ----------
 
+from functools import reduce
+
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
