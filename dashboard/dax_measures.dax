@@ -1,0 +1,118 @@
+-- Create the Date and Dim City calculated tables first, then create the measures below.
+
+Date =
+ADDCOLUMNS(
+    CALENDAR(MIN('gold_city_daily_aqi'[observed_date]), MAX('gold_city_daily_aqi'[observed_date])),
+    "Year", YEAR([Date]),
+    "Month Number", MONTH([Date]),
+    "Month", FORMAT([Date], "MMM"),
+    "Year Month", FORMAT([Date], "YYYY-MMM"),
+    "Quarter", "Q" & FORMAT([Date], "Q"),
+    "Weekday Number", WEEKDAY([Date], 2),
+    "Weekday", FORMAT([Date], "ddd")
+)
+
+Dim City =
+DISTINCT(
+    SELECTCOLUMNS(
+        'gold_city_daily_aqi',
+        "City", 'gold_city_daily_aqi'[city],
+        "State", 'gold_city_daily_aqi'[state]
+    )
+)
+
+Avg AQI = AVERAGE('gold_city_daily_aqi'[aqi])
+
+Max AQI = MAX('gold_city_daily_aqi'[aqi])
+
+Days Observed = COUNTROWS('gold_city_daily_aqi')
+
+Days Poor+ =
+CALCULATE(
+    COUNTROWS('gold_city_daily_aqi'),
+    'gold_city_daily_aqi'[aqi] >= 201
+)
+
+Poor+ Days % = DIVIDE([Days Poor+], [Days Observed], 0)
+
+Worst City =
+VAR CitySummary =
+    ADDCOLUMNS(
+        ALLSELECTED('gold_city_daily_aqi'[city]),
+        "City Avg AQI", CALCULATE([Avg AQI])
+    )
+RETURN
+    CONCATENATEX(TOPN(1, CitySummary, [City Avg AQI], DESC), 'gold_city_daily_aqi'[city])
+
+Worst City AQI =
+VAR CitySummary =
+    ADDCOLUMNS(ALLSELECTED('gold_city_daily_aqi'[city]), "City Avg AQI", CALCULATE([Avg AQI]))
+RETURN
+    MAXX(TOPN(1, CitySummary, [City Avg AQI], DESC), [City Avg AQI])
+
+Dominant Pollutant =
+VAR PollutantSummary =
+    UNION(
+        ROW("Pollutant", "PM2.5", "Value", AVERAGE('gold_city_daily_aqi'[pm2_5]) / 60),
+        ROW("Pollutant", "PM10", "Value", AVERAGE('gold_city_daily_aqi'[pm10]) / 100),
+        ROW("Pollutant", "NO2", "Value", AVERAGE('gold_city_daily_aqi'[no2]) / 80),
+        ROW("Pollutant", "SO2", "Value", AVERAGE('gold_city_daily_aqi'[so2]) / 80),
+        ROW("Pollutant", "CO", "Value", AVERAGE('gold_city_daily_aqi'[co]) / 2000),
+        ROW("Pollutant", "O3", "Value", AVERAGE('gold_city_daily_aqi'[o3]) / 100)
+    )
+RETURN
+    MAXX(TOPN(1, PollutantSummary, [Value], DESC), [Pollutant])
+
+AQI Category Color =
+SWITCH(
+    TRUE(),
+    [Avg AQI] <= 50, "#00B050",
+    [Avg AQI] <= 100, "#92D050",
+    [Avg AQI] <= 200, "#FFD600",
+    [Avg AQI] <= 300, "#FF9900",
+    [Avg AQI] <= 400, "#FF3B30",
+    "#B71C1C"
+)
+
+Last Refreshed = MAX('gold_city_daily_aqi'[gold_refreshed_ts])
+
+Last Refreshed Label = "Last refreshed: " & FORMAT([Last Refreshed], "dd MMM yyyy, HH:mm")
+
+Selected City = COALESCE(SELECTEDVALUE('Dim City'[City]), "All Cities")
+
+Overview Title = "Air Quality Overview — " & [Selected City]
+
+Selected Period =
+FORMAT(MIN('Date'[Date]), "dd MMM yyyy") & " – " & FORMAT(MAX('Date'[Date]), "dd MMM yyyy")
+
+Avg AQI YoY =
+CALCULATE([Avg AQI], SAMEPERIODLASTYEAR('Date'[Date]))
+
+AQI YoY Change = [Avg AQI] - [Avg AQI YoY]
+
+AQI YoY Change % = DIVIDE([AQI YoY Change], [Avg AQI YoY])
+
+Winter Poor+ Days % =
+VAR WinterRows =
+    FILTER(
+        'gold_city_daily_aqi',
+        MONTH('gold_city_daily_aqi'[observed_date]) IN {11, 12, 1, 2}
+    )
+RETURN
+    DIVIDE(
+        COUNTROWS(FILTER(WinterRows, 'gold_city_daily_aqi'[aqi] >= 201)),
+        COUNTROWS(WinterRows),
+        0
+    )
+
+Winter Insight =
+[Selected City] & " breaches Poor AQI on " & FORMAT([Winter Poor+ Days %], "0%") & " of winter days"
+
+City Rank by AQI =
+RANKX(ALLSELECTED('Dim City'[City]), [Avg AQI], , DESC, DENSE)
+
+Rush Hour Avg AQI =
+CALCULATE(
+    AVERAGE('gold_hourly_pattern'[avg_aqi]),
+    'gold_hourly_pattern'[is_rush_hour] = TRUE()
+)
