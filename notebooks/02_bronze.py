@@ -46,7 +46,8 @@ def append_open_meteo(source_folder: str, source_name: str, target_table: str) -
         .withColumnRenamed("value", "raw_json")
         .withColumn("source", F.lit(source_name))
         .withColumn("ingest_ts", F.to_timestamp(F.get_json_object("raw_json", "$.metadata.ingest_ts")))
-        .withColumn("file_name", F.input_file_name())
+        # input_file_name() is unsupported with Unity Catalog; _metadata is the supported source.
+        .withColumn("file_name", F.col("_metadata.file_path"))
         .withColumn("bronze_loaded_ts", F.current_timestamp())
         .withColumn("city", F.get_json_object("raw_json", "$.metadata.city"))
         .withColumn("state", F.get_json_object("raw_json", "$.metadata.state"))
@@ -71,7 +72,7 @@ def append_kaggle() -> int:
     bronze_df = (
         raw_df.withColumn("source", source_column)
         .withColumn("ingest_ts", ingest_column)
-        .withColumn("file_name", F.input_file_name())
+        .withColumn("file_name", F.col("_metadata.file_path"))
         .withColumn("bronze_loaded_ts", F.current_timestamp())
     )
     bronze_df.write.format("delta").mode("append").saveAsTable(KAGGLE_BRONZE_TABLE)
